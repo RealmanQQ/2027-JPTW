@@ -244,6 +244,13 @@ body[data-state="ready"] #gate{display:none}
 .file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .sheet .stack{display:flex;flex-direction:column;gap:8px}
 .f-meta .muted{opacity:.6}
+.files{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.file-link{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--ink);text-decoration:none;border:2px solid var(--ink);border-radius:999px;padding:1px 11px;background:var(--yellow-l);box-shadow:0 2px 0 var(--ink);transition:transform .15s}
+.file-link:active{transform:translateY(2px);box-shadow:none}
+.flight .files{justify-content:center}
+.details{list-style:none;margin:2px 0 0;padding:0}
+.details li{position:relative;padding-left:12px}
+.details li::before{content:"・";position:absolute;left:-2px}
 </style>
 </head>
 <body data-state="loading">
@@ -357,7 +364,7 @@ body[data-state="ready"] #gate{display:none}
 <section id="flights">
   <h2 class="sec-title"><span class="dot" style="background:var(--coral)">✈</span>航班</h2>
   <div class="flights" id="flightList"></div>
-  <p class="tip">※ 時間皆為台灣時間。</p>
+  <p class="tip">※ 時間皆為當地時間（日本快台灣 1 小時）。</p>
 </section>
 
 <!-- ============ 每日行程 ============ -->
@@ -626,6 +633,21 @@ function validate(d){
     if(day.art&&!ART[day.art]) return `第 ${i+1} 天的 art「${day.art}」不存在，可用：${Object.keys(ART).join('、')}`;
     for(const it of day.items){ for(const t of (it.tags||[])) if(!TAGS[t]) return `第 ${i+1} 天的交通標籤「${t}」不存在，可用：${Object.keys(TAGS).join('、')}`; }
   }
+  const fileErr=(files,where)=>{
+    if(files==null)return null;
+    if(!Array.isArray(files))return `${where} 的 files 必須是清單 [ ]`;
+    for(const f of files){
+      if(!f||typeof f!=='object')return `${where} 的 files 格式錯誤`;
+      const u=typeof f.url==='string'?f.url.trim():'';
+      if(u&&!/^https:\/\//i.test(u))return `${where} 的附件「${f.label||''}」連結必須以 https:// 開頭`;
+    }
+    return null;
+  };
+  for(const f of d.flights){const e=fileErr(f.files,`航班 ${f.label||f.id}`);if(e)return e}
+  for(const h of d.hotels){
+    const e=fileErr(h.files,`飯店 ${h.name||h.id}`);if(e)return e;
+    if(h.details!=null&&!Array.isArray(h.details)&&typeof h.details!=='string')return `飯店 ${h.name||h.id} 的 details 必須是文字或清單`;
+  }
   const ids=(arr,name)=>{const seen=new Set();for(const x of arr){if(!idOk(x.id))return `${name} 裡有不合格的 id「${x.id}」（只能用英數和 -）`;if(seen.has(x.id))return `${name} 裡的 id「${x.id}」重複了`;seen.add(x.id)}return null};
   return ids(d.flights,'flights')||ids(d.hotels,'hotels')||ids(d.todos,'todos')||ids(d.before,'before')||ids(d.pack,'pack')
     ||d.pack.map(c=>Array.isArray(c.items)?ids(c.items,'pack/'+c.id):`pack/${c.id} 缺少 items`).find(Boolean)||null;
@@ -703,6 +725,16 @@ function renderInfo(){
   countdown(); renderShared(); maybeSeed();
 }
 const val=(v,ph='待填')=>v?esc(v):`<span class="pending">${ph}</span>`;
+/* 附件按鈕：url 空白的項目不顯示 */
+const fileBtns=files=>{
+  const list=(Array.isArray(files)?files:[]).filter(f=>f&&typeof f.url==='string'&&/^https:\/\//i.test(f.url.trim()));
+  return list.length?`<div class="files">${list.map(f=>`<a class="file-link" href="${esc(f.url.trim())}" target="_blank" rel="noopener noreferrer" title="用旅伴名單內的 Google 帳號開啟">📎 ${esc(f.label||'附件')}</a>`).join('')}</div>`:'';
+};
+/* 訂單詳情：可寫成清單或單一文字；相容舊的 booking 欄位 */
+const detailLines=h=>{
+  const d=h.details!=null?h.details:h.booking;
+  return (Array.isArray(d)?d:String(d||'').split('\n')).map(x=>String(x).trim()).filter(Boolean);
+};
 function renderFlights(){
   const svg=c=>`<svg viewBox="0 0 100 40"><path d="M4 30 Q50 -4 96 30" fill="none" stroke="#3E3A39" stroke-width="2.5" stroke-dasharray="4 5"/><g class="float"><path d="M40 16 L62 13 q5 0 5 3 q0 3 -5 3 L40 20Z" fill="${c}" stroke="#3E3A39" stroke-width="2.5" stroke-linejoin="round"/></g></svg>`;
   $('flightList').innerHTML=(info.flights||[]).map((f,i)=>`
@@ -718,6 +750,7 @@ function renderFlights(){
         ${f.duration?`<span>${esc(f.duration)}</span>`:''}
         ${f.note?`<span>${esc(f.note)}</span>`:''}
       </div>
+      ${fileBtns(f.files)}
     </article>`).join('');
 }
 function renderHotels(){
@@ -730,9 +763,10 @@ function renderHotels(){
         <div class="kv"><b>區域</b>${esc(h.area)}</div>
         <div class="kv"><b>日期</b>${esc(h.checkin)} 入住 → ${esc(h.checkout)} 退房</div>
         <div class="kv"><b>地址</b>${val(h.address)}</div>
-        <div class="kv"><b>訂房編號</b>${val(h.booking)}</div>
+        <div class="kv"><b>訂單詳情</b>${(l=>l.length?`<ul class="details">${l.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:val(''))(detailLines(h))}</div>
         ${h.note?`<div class="kv"><b>備註</b>${esc(h.note)}</div>`:''}
         ${h.address?`<a class="map-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.address)}">🗺 開地圖</a>`:''}
+        ${fileBtns(h.files)}
         <span class="edit" contenteditable="true" role="textbox" aria-label="${esc(h.area)} 旅伴備註" data-ph="✎ 旅伴備註（大家都能改）" data-h="${esc(h.id)}"></span>
       </div>
     </article>`).join('');
